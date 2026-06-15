@@ -1,12 +1,6 @@
-FROM rust:1.88-slim AS chef
-RUN cargo install cargo-chef --locked
-WORKDIR /usr/src/sniffnet
+FROM rust:1.88-slim AS builder
 
-FROM chef AS planner
-COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
-
-FROM chef AS builder
+# Install build dependencies for both X11 and Wayland
 RUN apt-get update && apt-get install -y \
     libfreetype6-dev \
     libexpat1-dev \
@@ -18,13 +12,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/sniffnet
-COPY --from=planner /usr/src/sniffnet/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
-
 COPY . .
+
 RUN cargo build --release
 
+# Runtime stage
 FROM debian:bookworm-slim
+
+# Install runtime dependencies for both X11 and Wayland
 RUN apt-get update && apt-get install -y \
     libfreetype6 \
     libexpat1 \
