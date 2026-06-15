@@ -1,5 +1,5 @@
 FROM rust:1.88-slim AS chef
-RUN cargo install cargo-chef
+RUN cargo install cargo-chef --locked
 WORKDIR /usr/src/sniffnet
 
 FROM chef AS planner
