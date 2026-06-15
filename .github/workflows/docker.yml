@@ -68,7 +68,7 @@ jobs:
             pkg-config
 
       - name: Build Rust binary
-        run: cargo build --release
+        run: cargo build --release --config 'profile.release.lto="thin"'
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
