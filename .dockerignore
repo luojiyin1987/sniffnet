@@ -1,6 +1,4 @@
-*
-!target/
-target/*
-!target/release/
-target/release/*
-!target/release/sniffnet
+.git/
+target/
+Dockerfile
+.dockerignore

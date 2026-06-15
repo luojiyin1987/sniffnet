@@ -49,27 +49,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libfreetype6-dev \
-            libexpat1-dev \
-            libpcap-dev \
-            libasound2-dev \
-            libfontconfig1-dev \
-            libgtk-3-dev \
-            pkg-config
-
-      - name: Build Rust binary
-        run: cargo build --release --config 'profile.release.lto="thin"'
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
