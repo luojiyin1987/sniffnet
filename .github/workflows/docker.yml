@@ -2,14 +2,25 @@ name: Docker
 
 on:
   workflow_dispatch:
+    inputs:
+      force_publish:
+        description: 'Skip version existence check'
+        type: boolean
+        default: false
+
+env:
+  REGISTRY: ghcr.io
 
 jobs:
-  docker:
-    name: Docker Build
+  check-version:
+    name: Check version
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      packages: read
+    outputs:
+      version: ${{ steps.cargo-version.outputs.version }}
+      image: ${{ steps.image-name.outputs.image }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -21,15 +32,38 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Check there is no existing image with the same version
+      - name: Compute lowercase image name
+        id: image-name
         run: |
-          if docker manifest inspect ghcr.io/gyulyvgc/sniffnet:${{ env.VERSION }}; then
-            echo "Image with version ${{ env.VERSION }} already exists"
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+
+      - name: Check existing version
+        if: inputs.force_publish != true
+        run: |
+          if docker buildx imagetools inspect "${{ steps.image-name.outputs.image }}:${{ steps.cargo-version.outputs.version }}" > /dev/null 2>&1; then
+            echo "Image with version ${{ steps.cargo-version.outputs.version }} already exists"
+            echo "Re-run with force_publish=true to overwrite"
             exit 1
           fi
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+  build:
+    name: Build ${{ matrix.arch }}
+    needs: check-version
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -37,16 +71,51 @@ jobs:
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
         with:
-          registry: ghcr.io
-          username: GyulyVGC
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/${{ matrix.arch }}
           push: true
           tags: |
-            ghcr.io/gyulyvgc/sniffnet:latest
-            ghcr.io/gyulyvgc/sniffnet:${{ env.VERSION }}
+            ${{ needs.check-version.outputs.image }}:${{ needs.check-version.outputs.version }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=sniffnet-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=sniffnet-${{ matrix.arch }}
+
+  merge-manifest:
+    name: Merge multi-arch manifest
+    needs: [check-version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push multi-arch manifest
+        run: |
+          VERSION=${{ needs.check-version.outputs.version }}
+          IMAGE=${{ needs.check-version.outputs.image }}
+          docker buildx imagetools create \
+            -t "${IMAGE}:latest" \
+            -t "${IMAGE}:${VERSION}" \
+            "${IMAGE}:${VERSION}-amd64" \
+            "${IMAGE}:${VERSION}-arm64"
+
+      - name: Verify manifest
+        run: |
+          IMAGE=${{ needs.check-version.outputs.image }}
+          VERSION=${{ needs.check-version.outputs.version }}
+          echo "=== Manifest: ${IMAGE}:${VERSION} ==="
+          docker buildx imagetools inspect "${IMAGE}:${VERSION}"
+          echo "=== Manifest: ${IMAGE}:latest ==="
+          docker buildx imagetools inspect "${IMAGE}:latest"
